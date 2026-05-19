@@ -34,7 +34,7 @@ bgfx::VertexLayout s_layout;
 void fun::Engine::m_platformInit() {
     // SDL3 窗口
     SDL_Init(SDL_INIT_VIDEO);
-    g_window = SDL_CreateWindow("FunEngine — Phase 1", 1280, 720, 0);
+    g_window = SDL_CreateWindow("FunEngine -- Phase 1", 1280, 720, 0);
     FUN_INFO("SDL3 window created: 1280x720");
 
     // bgfx 初始化
@@ -93,7 +93,7 @@ void fun::Engine::m_platformPollEvents() {
 void fun::Engine::m_platformRender(float dt) {
     bgfx::setViewRect(0, 0, 0, 1280, 720);
 
-    // 创建顶点缓冲（每帧重建，简单但低效 — Phase 4 再优化）
+    // 创建顶点缓冲（每帧重建，简单但低效 -- Phase 4 再优化）
     bgfx::TransientVertexBuffer tvb;
     bgfx::allocTransientVertexBuffer(&tvb, 3, s_layout);
     bx::memCopy(tvb.data, s_triangleVertices, sizeof(s_triangleVertices));

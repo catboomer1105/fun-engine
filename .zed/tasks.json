@@ -14,7 +14,7 @@
     "command": "cmd",
     "args": [
       "/c",
-      "ThirdParty\\shaderc.exe -f Assets/Shaders/vs_triangle.sc -o Assets/Shaders/vs_triangle.h --type vertex --platform windows --profile s_5_0 -i Assets/Shaders/include --bin2c vs_triangle --varyingdef Assets/Shaders/varying.def.sc && ThirdParty\\shaderc.exe -f Assets/Shaders/fs_triangle.sc -o Assets/Shaders/fs_triangle.h --type fragment --platform windows --profile s_5_0 -i Assets/Shaders/include --bin2c fs_triangle --varyingdef Assets/Shaders/varying.def.sc",
+      "\"ThirdParty\\shaderc.exe -f Assets/Shaders/vs_triangle.sc -o Assets/Shaders/vs_triangle.h --type vertex --platform windows --profile s_5_0 -i Assets/Shaders/include --bin2c vs_triangle --varyingdef Assets/Shaders/varying.def.sc && ThirdParty\\shaderc.exe -f Assets/Shaders/fs_triangle.sc -o Assets/Shaders/fs_triangle.h --type fragment --platform windows --profile s_5_0 -i Assets/Shaders/include --bin2c fs_triangle --varyingdef Assets/Shaders/varying.def.sc\"",
     ],
   },
   {
@@ -22,7 +22,7 @@
     "command": "cmd",
     "args": [
       "/c",
-      "xmake f -p windows -a x64 --vs=2022 -m debug && xmake build",
+      "\"xmake f -p windows -a x64 --vs=2022 -m debug && xmake build\"",
     ],
   },
   {
@@ -30,7 +30,7 @@
     "command": "cmd",
     "args": [
       "/c",
-      "xmake f -p windows -a x64 --vs=2022 -m release && xmake build",
+      "\"xmake f -p windows -a x64 --vs=2022 -m release && xmake build\"",
     ],
   },
   {
@@ -38,7 +38,44 @@
     "command": "cmd",
     "args": [
       "/c",
-      "ThirdParty\\shaderc.exe -f Assets/Shaders/vs_triangle.sc -o Assets/Shaders/vs_triangle.h --type vertex --platform windows --profile s_5_0 -i Assets/Shaders/include --bin2c vs_triangle --varyingdef Assets/Shaders/varying.def.sc && ThirdParty\\shaderc.exe -f Assets/Shaders/fs_triangle.sc -o Assets/Shaders/fs_triangle.h --type fragment --platform windows --profile s_5_0 -i Assets/Shaders/include --bin2c fs_triangle --varyingdef Assets/Shaders/varying.def.sc && xmake f -p windows -a x64 --vs=2022 -m debug && xmake build",
+      "\"ThirdParty\\shaderc.exe -f Assets/Shaders/vs_triangle.sc -o Assets/Shaders/vs_triangle.h --type vertex --platform windows --profile s_5_0 -i Assets/Shaders/include --bin2c vs_triangle --varyingdef Assets/Shaders/varying.def.sc && ThirdParty\\shaderc.exe -f Assets/Shaders/fs_triangle.sc -o Assets/Shaders/fs_triangle.h --type fragment --platform windows --profile s_5_0 -i Assets/Shaders/include --bin2c fs_triangle --varyingdef Assets/Shaders/varying.def.sc && xmake f -p windows -a x64 --vs=2022 -m debug && xmake build\"",
     ],
+  },
+  {
+    "label": "Build UnitTests Debug",
+    "command": "cmd",
+    "args": [
+      "/c",
+      "\"xmake f -p windows -a x64 --vs=2022 -m debug && xmake build UnitTests\"",
+    ],
+  },
+  {
+    "label": "Build UnitTests Release",
+    "command": "cmd",
+    "args": [
+      "/c",
+      "\"xmake f -p windows -a x64 --vs=2022 -m release && xmake build UnitTests\"",
+    ],
+  },
+  {
+    "label": "Run UnitTests Debug",
+    "command": "cmd",
+    "args": [
+      "/c",
+      "\"xmake f -p windows -a x64 --vs=2022 -m debug && xmake run UnitTests\"",
+    ],
+  },
+  {
+    "label": "Run UnitTests Release",
+    "command": "cmd",
+    "args": [
+      "/c",
+      "\"xmake f -p windows -a x64 --vs=2022 -m release && xmake run UnitTests\"",
+    ],
+  },
+  {
+    "label": "Generate CompileCommands",
+    "command": "xmake",
+    "args": ["project", "-k", "compile_commands"],
   },
 ]

@@ -114,6 +114,7 @@ Fun Engine 是一款模块化、分层的 3D 游戏引擎。核心目标是**简
 | **tracy** | 性能分析工具 | `add_requires("tracy")` |
 | **sol2** | Lua C++ 绑定 | `add_requires("sol2")` |
 | **lua** | 脚本运行时 | `add_requires("lua")` |
+| **gtest** | 单元测试框架 | `add_requires("gtest")` |
 
 ---
 
@@ -678,7 +679,8 @@ add_requires(
     "tinygltf",        -- glTF 加载
     "lua",             -- 脚本运行时
     "sol2",            -- Lua 绑定
-    "tracy")           -- 性能分析
+    "tracy",           -- 性能分析
+    "gtest")           -- 单元测试
 
 -- ── 引擎库 ────────────────────────────────────
 target("FunEngine")
@@ -729,10 +731,10 @@ end
 ### Phase 1 — 基础骨架
 
 - [x] 项目目录 & xmake 构建
-- [ ] SDL3 窗口 + bgfx 初始化三角形
-- [ ] 核心数学库 (GLM 直接使用)
-- [ ] spdlog 日志集成
-- [ ] 帧循环与 deltaTime
+- [x] SDL3 窗口 + bgfx 初始化三角形
+- [x] 核心数学库 (GLM 直接使用)
+- [x] spdlog 日志集成
+- [x] 帧循环与 deltaTime
 
 **验收：** 窗口 1280×720，灰色背景，彩色三角形可见。按 Esc 退出。控制台输出带时间戳的日志。全部源文件 ≤ 10 个。`xmake build Sandbox` 一键编译。
 
@@ -740,10 +742,10 @@ end
 
 ### Phase 2 — 核心层
 
-- [ ] 帧分配器 (LinearAllocator)
-- [ ] JSON 序列化 (JsonArchive)
-- [ ] 事件总线
-- [ ] GameObject / Component 系统（含 OnSerialize / OnInspector / OnBindLua 虚函数）
+- [x] 帧分配器 (LinearAllocator)
+- [x] JSON 序列化 (JsonArchive)
+- [x] 事件总线
+- [x] GameObject / Component 系统（含 OnSerialize / OnInspector / OnBindLua 虚函数）
 
 **验收：** 能 `new GameObject("Test")`，`AddComponent<MyComponent>()`，`GetComponent<T>()`。一个 Component 覆写 `OnInspector()` 后能在 ImGui 窗口画自己的属性。GameObject 树能序列化为 JSON 再反序列化还原。事件总线能 `Emit("Damage", {target, 25})` 被订阅者收到。无需任何 ClassDB/PropertyInfo/Variant 代码。
 
@@ -800,6 +802,37 @@ end
 - [ ] 文档与示例
 
 **验收：** `xmake build Runtime` 生成无编辑器版本。打包成 zip 发给朋友能双击运行。Demo 是一个完整的 FPS 关卡（场景 + 敌人 + 计分）。tracy 能抓帧并显示 CPU/GPU 耗时分布。
+
+---
+
+### Phase 7 — 单元测试
+
+- [x] 集成 Google Test (gtest) 框架
+- [x] LinearAllocator 单元测试
+- [x] JsonArchive 单元测试
+- [x] EventBus 单元测试
+- [x] GameObject / Component / Transform 单元测试
+
+**测试框架：** Google Test (gtest)，通过 xrepo 管理 (`add_requires("gtest")`)。
+
+**测试目录：** `Tests/`，每个模块一个测试文件：
+
+```
+Tests/
+├── TestLinearAllocator.cpp    # 帧分配器测试
+├── TestJsonArchive.cpp        # JSON 序列化测试
+├── TestEventBus.cpp           # 事件总线测试
+└── TestGameObject.cpp         # GameObject/Component/Transform 测试
+```
+
+**构建与运行：**
+
+```bash
+xmake build UnitTests
+xmake run UnitTests
+```
+
+**验收：** 所有测试通过。每个新增模块都有对应的 gtest 测试文件。Sandbox 中不再包含测试代码，仅作为引擎运行沙盒。后续每个 Phase 完成后，新模块必须有对应的 gtest 测试。
 
 ---
 
@@ -903,7 +936,8 @@ Windows 上把整个 `MyGame/` 打成 zip 分发给玩家。双击 `Runtime.exe`
 - **头文件：** 使用 `#pragma once`
 - **命名空间：** 所有引擎代码在 `fun::` 下
 - **错误处理：** 使用异常处理致命错误，`std::optional<T>` 处理可恢复的失败
-- **智能指针：** 优先级 — 值语义 > `std::unique_ptr` > `std::shared_ptr`
+- **智能指针：** 优先级 -- 值语义 > `std::unique_ptr` > `std::shared_ptr`
+- **运行时输出 ASCII 兼容：** 所有通过日志宏（`FUN_INFO` 等）、窗口标题、控制台输出等途径显示的字符串，必须只包含 ASCII 字符（0x20-0x7E）。禁止使用 em dash (`--` 替代 `—`)、中文引号（`"` 替代 `""`）、全角符号等非 ASCII 字符。原因：Windows 控制台默认 CP936 编码，UTF-8 多字节字符会被错误解码为乱码
 
 ---
 
