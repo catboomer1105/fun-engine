@@ -24,19 +24,19 @@ Fun Engine 是一款模块化、分层的 3D 游戏引擎。核心目标是**简
 │            ImGui Editor / 场景编辑器 / 资源浏览器              │
 ├─────────────────────────────────────────────────────────────┤
 │                      功能层 (Function Layer)                  │
-│  渲染 │ 物理 │ 动画 │ 音频 │ 输入 │ 场景 │ 脚本(Lua) │
+│     渲染 │ 物理 │ 动画 │ 音频 │ 输入 │ 脚本(Lua) │ UI      │
 ├─────────────────────────────────────────────────────────────┤
 │                      资源层 (Resource Layer)                  │
 │      资源管理  │  同步加载  │  资源引用                     │
 ├─────────────────────────────────────────────────────────────┤
 │                      核心层 (Core Layer)                      │
-│  数学 │ 内存 │ 序列化 │ 事件 │ GameObject+Component │
+│  数学 │ 内存 │ 序列化 │ 事件 │ GameObject+Component │ 场景 │
 ├─────────────────────────────────────────────────────────────┤
 │                     平台层 (Platform Layer)                   │
 │   窗口管理  │  文件系统  │  线程  │  平台抽象  │  输入(底层)     │
 ├─────────────────────────────────────────────────────────────┤
 │                  第三方库 (全部 xrepo 管理)                    │
-│  bgfx  │  Jolt  │  SDL3  │  ozz  │  ImGui  │  fmt  │  ...   │
+│  bgfx  │  Jolt  │  SDL3  │  ozz  │  RmlUi  │  ImGui  │  ...  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -86,7 +86,15 @@ Fun Engine 是一款模块化、分层的 3D 游戏引擎。核心目标是**简
 | **xrepo** | `add_requires("libsdl_mixer")` |
 | **职责** | 音频播放 (WAV/MP3/OGG/FLAC)、多声道混音、3D 音效 |
 
-### 3.6 编辑器UI — Dear ImGui
+### 3.6 运行时UI — RmlUi
+
+| 项目 | 说明 |
+|------|------|
+| **仓库** | https://github.com/mikke89/RmlUi |
+| **xrepo** | `add_requires("rmlui")` |
+| **职责** | 运行时游戏UI（HTML/CSS风格，数据绑定，动画） |
+
+### 3.7 编辑器UI — Dear ImGui
 
 | 项目 | 说明 |
 |------|------|
@@ -102,7 +110,7 @@ Fun Engine 是一款模块化、分层的 3D 游戏引擎。核心目标是**简
 | **xrepo** | `add_requires("glm")` |
 | **职责** | 向量、矩阵、四元数、投影变换 |
 
-### 3.8 其他依赖
+### 3.9 其他依赖
 
 | 库 | 用途 | xrepo |
 |----|------|-------|
@@ -169,6 +177,10 @@ Core/
 │   ├── GameObject.h          # 游戏对象 (Transform + Component 容器)
 │   ├── Component.h           # 组件基类 (含序列化 / Inspector / Lua 绑定)
 │   └── Transform.h           # 变换组件 (每个 GameObject 必有)
+├── Scene/
+│   ├── Scene.h               # 场景（GameObject 层级树的容器）
+│   ├── SceneManager.h        # 场景管理器（加载/卸载/切换）
+│   └── Prefab.h              # 预制体（GameObject 模板，支持嵌套）
 └── Core.h                    # 核心头文件汇总 + 引擎初始化
 ```
 
@@ -279,6 +291,8 @@ Component (基类)
 ├── Camera           # 摄像机
 ├── Light            # 光源
 ├── LuaScript        # Lua 脚本组件 (每个实例对应一个 .lua 文件)
+├── UICanvas         # UI 画布 (RmlUi 文档容器)
+├── UIWidget         # UI 控件 (按钮/文本/图片等 RML 元素封装)
 └── (用户 Lua 扩展)  # 通过 LuaScript 挂载任意 Lua 行为
 ```
 
@@ -342,6 +356,100 @@ class MyComponent : public Component {
 - 纯虚函数是 C++ 原语，零学习成本——不需要理解 Variant/PropertyInfo/getter/setter
 - `OnInspector()` 直接写 ImGui 调用，可以有自定义布局、条件显示、分组——不受 VariantType 枚举限制
 - 属性名重复两三次（序列化 + Inspector + Lua），换个名字是 IDE 一键重命名，实际代价为零
+
+**场景系统设计详解：**
+
+场景系统属于核心层，因为它只依赖 GameObject / Component 和序列化——不依赖渲染、物理等上层系统。场景就是 GameObject 层级树的容器，加上加载/卸载/切换的管理能力。
+
+```cpp
+// ── Scene.h ──
+class Scene {
+    std::string m_name;
+    std::vector<GameObject*> m_rootObjects;   // 根级对象（子对象通过 Transform 层级关联）
+    bool m_loaded = false;
+
+public:
+    const std::string& GetName() const;
+    GameObject* CreateGameObject(const std::string& name);
+    GameObject* Find(const std::string& name) const;
+    std::vector<GameObject*> FindByTag(const std::string& tag) const;
+    void Destroy(GameObject* obj);
+
+    // 遍历所有 GameObject（递归）
+    void ForEach(const std::function<void(GameObject*)>& callback);
+
+    // 序列化 — 场景保存为 JSON (.scene 文件)
+    void Serialize(JsonArchive& ar);
+    void Deserialize(JsonArchive& ar);
+};
+
+// ── SceneManager.h ──
+class SceneManager {
+    Scene* m_activeScene = nullptr;
+    std::unordered_map<std::string, Scene*> m_loadedScenes;
+
+public:
+    Scene* GetActiveScene() const;
+
+    // 同步加载（后续可扩展异步）
+    Scene* LoadScene(const std::string& path);
+    void UnloadScene(const std::string& name);
+    void SetActiveScene(const std::string& name);
+
+    // 场景切换事件
+    Event<void(Scene*)> OnSceneLoaded;
+    Event<void(Scene*)> OnSceneUnloaded;
+};
+```
+
+**场景文件格式（.scene JSON）：**
+
+```json
+{
+    "name": "Arena",
+    "gameObjects": [
+        {
+            "name": "Player",
+            "tag": "Player",
+            "transform": { "position": [0,0,0], "rotation": [0,0,0,1], "scale": [1,1,1] },
+            "components": [
+                { "type": "MeshRenderer", "mesh": "guid://...", "material": "guid://..." },
+                { "type": "RigidBody", "mass": 80 },
+                { "type": "LuaScript", "script": "player_controller.lua" }
+            ],
+            "children": [
+                { "name": "Camera", "transform": {...}, "components": [...] }
+            ]
+        }
+    ]
+}
+```
+
+**Prefab 设计：**
+
+```cpp
+// ── Prefab.h ──
+class Prefab {
+    std::string m_name;
+    GameObject* m_template;   // 模板对象（不参与场景更新）
+
+public:
+    // 从 .prefab 文件加载（本质是只有一个根 GameObject 的 .scene 文件）
+    static Prefab* Load(const std::string& path);
+
+    // 实例化：深拷贝模板，返回独立 GameObject
+    GameObject* Instantiate();
+
+    // 嵌套 Prefab：子 GameObject 的组件可以引用其他 Prefab
+    // 修改模板后所有实例可选择同步更新
+};
+```
+
+**为什么场景系统放在核心层而非功能层：**
+- 场景只依赖 GameObject / Component 和序列化，这两个都是核心层子系统
+- 场景不依赖渲染、物理、动画等上层系统——上层系统以 Component 形式挂载到 GameObject 上，与场景管理解耦
+- 场景序列化（.scene / .prefab 文件）依赖 JsonArchive，已在 Phase 2 完成
+- 放在核心层意味着做完 Phase 2 就能实现场景加载/保存，后续 Phase 只需实现具体 Component
 
 ---
 
@@ -429,10 +537,6 @@ Function/
 │   └── ozz/
 │       ├── OzzManager.cpp   # ozz 运行时管理
 │       └── OzzUtils.cpp     # ozz ↔ 引擎类型转换
-├── Scene/
-│   ├── Scene.h              # 场景（GameObject 层级树的容器）
-│   ├── SceneManager.h       # 场景管理器（加载/卸载/切换）
-│   └── Prefab.h             # 预制体（GameObject 模板，支持嵌套）
 ├── Input/
 │   ├── InputSystem.h        # 输入系统（动作映射）
 │   ├── InputAction.h        # 输入动作 (Jump, Fire, Move...)
@@ -444,13 +548,21 @@ Function/
 │   └── SDLMixer/
 │       ├── SDLMixerManager.cpp  # SDL_mixer3 初始化 / 混音管理
 │       └── SDLMixerUtils.cpp    # SDL_mixer ↔ 引擎类型转换
-└── Script/
-    ├── ScriptSystem.h       # 脚本系统入口
-    ├── LuaScript.h          # Lua 脚本组件
-    └── Lua/
-        ├── LuaManager.cpp   # Lua 虚拟机管理 (sol2)
-        ├── LuaBindings.cpp  # C++ API 绑定到 Lua
-        └── LuaDebugger.cpp  # Lua 调试支持
+├── Script/
+│   ├── ScriptSystem.h       # 脚本系统入口
+│   ├── LuaScript.h          # Lua 脚本组件
+│   └── Lua/
+│       ├── LuaManager.cpp   # Lua 虚拟机管理 (sol2)
+│       ├── LuaBindings.cpp  # C++ API 绑定到 Lua
+│       └── LuaDebugger.cpp  # Lua 调试支持
+└── UI/
+    ├── UISystem.h           # UI 系统入口
+    ├── UICanvas.h           # UI 画布组件 (挂载到 GameObject)
+    ├── UIWidget.h           # UI 控件基类
+    ├── UIDocument.h         # RML 文档封装
+    └── RmlUi/
+        ├── RmlManager.cpp   # RmlUi 初始化 / 渲染后端
+        └── RmlUtils.cpp     # RmlUi ↔ 引擎类型转换
 ```
 
 **渲染管线（简单前向渲染，Phase 1）：**
@@ -462,31 +574,9 @@ Function/
 4. 天空盒Pass
 5. 半透明Pass → 按距离排序渲染
 6. 后处理Pass (Bloom → Tonemap → FXAA)
-7. ImGui Pass
-8. bgfx::frame() 提交
-```
-
-**场景系统：**
-
-```
-Scene
-├── GameObject "Player"
-│   ├── Transform          (position, rotation, scale)
-│   ├── MeshRenderer        (→ mesh + material)
-│   ├── RigidBody           (mass: 80, drag: 0.1)
-│   ├── CapsuleCollider     (height: 1.8, radius: 0.4)
-│   ├── Animator            (→ animation graph)
-│   ├── AudioSource         (→ footstep clips)
-│   └── LuaScript           (→ player_controller.lua)
-│
-├── GameObject "Main Camera"
-│   ├── Transform
-│   ├── Camera              (fov: 60, near: 0.1, far: 1000)
-│   └── AudioListener
-│
-└── GameObject "Directional Light"
-    ├── Transform
-    └── Light               (type: Directional, color, intensity)
+7. RmlUi Pass (运行时 UI 渲染)
+8. ImGui Pass (编辑器 / 调试)
+9. bgfx::frame() 提交
 ```
 
 场景即 GameObject 层级树。每个 Component 在 `OnUpdate(dt)` 中被调用。GameObject 通过 `SetParent()` 构建父子关系，Transform 自动继承父级变换。
@@ -591,7 +681,8 @@ FunEngine/                       # 仓库根目录
 │   │   ├── Memory/              #   LinearAllocator
 │   │   ├── Serialization/       #   JsonArchive
 │   │   ├── Event/               #   EventBus
-│   │   └── GameObject/          #   GameObject, Component, Transform
+│   │   ├── GameObject/          #   GameObject, Component, Transform
+│   │   └── Scene/                #   场景管理, SceneManager, Prefab
 │   │
 │   ├── Platform/                # 平台层
 │   │   └── SDL3/                #   窗口, 输入, 文件系统
@@ -609,10 +700,10 @@ FunEngine/                       # 仓库根目录
 │   │   ├── Render/              #   渲染系统 + bgfx 后端
 │   │   ├── Physics/             #   物理系统 + Jolt 后端
 │   │   ├── Animation/           #   动画系统 + ozz 后端
-│   │   ├── Scene/               #   场景管理
 │   │   ├── Input/               #   输入动作映射
 │   │   ├── Audio/               #   音频系统 + SDL_mixer 后端
-│   │   └── Script/              #   Lua 脚本系统
+│   │   ├── Script/              #   Lua 脚本系统
+│   │   └── UI/                  #   UI 系统 + RmlUi 后端
 │   │
 │   └── Editor/                  # 工具层 (#ifdef FUN_EDITOR)
 │       ├── Editor.cpp           #   编辑器入口 main()
@@ -627,7 +718,7 @@ FunEngine/                       # 仓库根目录
 │   ├── Meshes/                  #   基础几何体 .glb
 │   └── Materials/               #   默认材质
 │
-├── Runtime/                     # ====== 独立游戏启动器 (Phase 6) ======
+├── Runtime/                     # ====== 独立游戏启动器 (Phase 11) ======
 │   └── Runtime.cpp              #   一个 main(), 链接 FunEngine
 │
 ├── Tests/                       # ====== 测试 ======
@@ -647,7 +738,7 @@ xrepo/  →  Platform/  →  Core/  →  Resource/  →  Function/  →  Editor/
 第三方      平台层        核心层      资源层         功能层         工具层
 ```
 
-15 个第三方库全部由 xrepo 管理，不出现在仓库目录中。
+16 个第三方库全部由 xrepo 管理，不出现在仓库目录中。
 
 只看 `Engine/` 目录就能看到完整的 5 层架构，每层一个子目录，层之间不会跨目录引用。`Editor/` 通过 `#ifdef FUN_EDITOR` 条件编译，不会进入 Runtime。
 
@@ -670,6 +761,7 @@ add_requires(
     "bgfx",            -- 渲染 (自动带 bimg + bx)
     "joltphysics",     -- 物理
     "ozz-animation",   -- 动画
+    "rmlui",           -- 运行时 UI
     "imgui",           -- 编辑器 UI
     "glm",             -- 数学
     "fmt",             -- 格式化
@@ -690,7 +782,7 @@ target("FunEngine")
     add_packages(
         "libsdl", "libsdl_mixer", "bgfx",
         "joltphysics", "ozz-animation",
-        "imgui", "glm", "fmt", "spdlog",
+        "rmlui", "imgui", "glm", "fmt", "spdlog",
         "nlohmann_json", "stb", "tinygltf",
         "lua", "sol2", "tracy")
 
@@ -751,7 +843,19 @@ end
 
 ---
 
-### Phase 3 — 资源层
+### Phase 3 — 场景系统（核心层）
+
+- [ ] Scene 类：GameObject 层级树容器，创建/查找/销毁/遍历
+- [ ] Scene 序列化：场景保存/加载为 .scene JSON 文件
+- [ ] SceneManager：场景加载/卸载/切换，场景切换事件
+- [ ] Prefab：GameObject 模板，加载 .prefab 文件，Instantiate 深拷贝
+- [ ] Tag 系统：GameObject 按 tag 查找
+
+**验收：** SceneManager::LoadScene 从 JSON 文件加载完整场景（含多层嵌套 GameObject 和 Component 属性）。SaveScene 把当前场景序列化为 JSON 再加载回来，GameObject 层级和 Component 属性完全一致。Prefab::Load 后 Instantiate 在场景中生成实例。修改 .scene 文件后重新加载场景，修改生效。此 Phase 不涉及渲染——加载的场景对象在内存中存在，但还没有 MeshRenderer 等视觉 Component（留给 Phase 5 渲染系统）。
+
+---
+
+### Phase 4 — 资源层
 
 - [ ] 资源基类与 ResourceHandle
 - [ ] ResourceManager（同步加载）
@@ -761,25 +865,82 @@ end
 - [ ] Material 系统
 - [ ] Skeleton + Animation 加载 (ozz)
 
-**验收：** `ResourceManager::Load<Mesh>("cube.glb")` 返回可用 Mesh，包含顶点和索引数据。纹理从 PNG 加载后显示在 bgfx 中。Material 能绑定 Shader + 参数。ozz 骨架和动画能从 glTF 提取后正确采样。所有资源通过 GUID 引用，换路径不影响引用。
+**验收：** ResourceManager::Load<Mesh> 返回可用 Mesh，包含顶点和索引数据。纹理从 PNG 加载后显示在 bgfx 中。Material 能绑定 Shader + 参数。ozz 骨架和动画能从 glTF 提取后正确采样。所有资源通过 GUID 引用，换路径不影响引用。
 
 ---
 
-### Phase 4 — 功能层
+### Phase 5 — 功能层：渲染系统
 
-- [ ] 渲染系统 (MeshRenderer, Camera, Light, Skybox)
-- [ ] 物理系统 (Jolt 集成, RigidBody, Colliders)
-- [ ] 动画系统 (ozz 采样 + 混合)
-- [ ] 输入系统 (动作映射)
-- [ ] 场景管理 (Scene / SceneManager)
-- [ ] 音频系统 (SDL_mixer3 集成)
-- [ ] Lua 脚本系统 (sol2 绑定 + 热重载)
+- [ ] RenderSystem 渲染系统入口
+- [ ] MeshRenderer 组件（引用 Mesh + Material）
+- [ ] Camera 组件（透视/正交，视口裁剪）
+- [ ] Light 组件（Directional / Point / Spot）
+- [ ] Skybox 天空盒
+- [ ] DebugDraw 调试绘制（线框、箭头、包围盒）
+- [ ] 前向渲染管线：收集 → 不透明Pass → 天空盒 → 半透明Pass → bgfx::frame()
 
-**验收：** Sandbox 能用 Lua 脚本控制角色移动、播放动画、触发射击。按下跳跃键角色跳起并受重力回落。子弹碰撞墙体产生碰撞事件。修改 .lua 文件保存后自动重载，不重启程序。`SceneManager::LoadScene("a.scene")` 切换到另一个场景。
+**验收：** Sandbox 能加载 glTF 模型并通过 MeshRenderer 渲染到窗口。Camera 组件控制视角。Directional Light 照亮场景。天空盒可见。DebugDraw 能画线框包围盒。
 
 ---
 
-### Phase 5 — 编辑器
+### Phase 6 — 功能层：物理系统
+
+- [ ] PhysicsSystem 物理系统入口（Jolt 集成）
+- [ ] RigidBody 刚体组件（质量、阻力、重力）
+- [ ] Collider 碰撞体组件（Box / Sphere / Capsule）
+- [ ] CharacterController 角色控制器
+- [ ] PhysicsMaterial 物理材质（摩擦/反弹）
+- [ ] 碰撞事件 → EventBus（OnCollisionEnter / Exit）
+- [ ] Transform ↔ Jolt Body 同步
+
+**验收：** 给 GameObject 添加 RigidBody + Collider 后受重力下落，碰到地面停止。两个碰撞体碰撞时 EventBus 收到碰撞事件。CharacterController 能在场景中移动并上下台阶。
+
+---
+
+### Phase 7 — 功能层：动画 + 音频
+
+- [ ] AnimationSystem 动画系统入口（ozz 运行时）
+- [ ] Animator 组件（播放/混合/过渡动画片段）
+- [ ] SkeletonComponent 骨骼组件
+- [ ] AnimationGraph 动画状态机（Idle → Walk → Run 过渡）
+- [ ] AudioSystem 音频系统入口（SDL_mixer3）
+- [ ] AudioSource 组件（3D 空间音效）
+- [ ] AudioListener 组件（绑定到 Camera）
+
+**验收：** glTF 导入的骨骼动画在 ozz 中正确采样播放。Animator 能在 Idle/Walk/Run 之间平滑过渡。AudioSource 播放音效有 3D 空间衰减效果。
+
+---
+
+### Phase 8 — 功能层：输入 + 脚本(Lua)
+
+- [ ] InputSystem 输入系统（动作映射）
+- [ ] InputAction 输入动作定义 (Jump, Fire, Move...)
+- [ ] InputMapping 键位绑定（键盘/鼠标/手柄，支持组合键）
+- [ ] ScriptSystem + LuaManager（sol2 绑定）
+- [ ] LuaScript 组件（.lua 文件挂载到 GameObject）
+- [ ] self.gameObject / self.transform 自动注入
+- [ ] LuaBindings：引擎 API 暴露给 Lua（Transform, Input, Scene, Physics 等）
+- [ ] Lua 热重载（检测文件变更 → 重新加载 → 保留数据表）
+
+**验收：** Sandbox 能用 Lua 脚本控制角色移动、播放动画、触发射击。按下跳跃键角色跳起并受重力回落。子弹碰撞墙体产生碰撞事件。修改 .lua 文件保存后自动重载，不重启程序。SceneManager::LoadScene 切换到另一个场景。
+
+---
+
+### Phase 9 — 功能层：UI 系统
+
+- [ ] UISystem 入口（RmlUi 集成）
+- [ ] UICanvas 组件（挂载到 GameObject，管理 RML 文档生命周期）
+- [ ] UIWidget 组件（按钮 / 文本 / 图片 / 进度条等封装）
+- [ ] RmlUi 渲染后端（bgfx 纹理/顶点提交）
+- [ ] RmlUi 输入桥接（鼠标/键盘/手柄事件转发到 RmlUi）
+- [ ] 数据绑定：C++/Lua 变量绑定到 RML 元素属性
+- [ ] UI 资源加载：.rml / .rcss / .tga 走 ResourceManager
+
+**验收：** Sandbox 中 UICanvas 加载 .rml 文件显示血条和分数文本。Lua 脚本修改 `self.health` 后 UI 自动更新。按钮点击触发 Lua 回调。RmlUi 渲染在 3D 场景之上，不穿透到场景中。
+
+---
+
+### Phase 10 — 编辑器
 
 - [ ] ImGui 初始化 + Docking 布局
 - [ ] Viewport + Hierarchy + Inspector
@@ -792,7 +953,7 @@ end
 
 ---
 
-### Phase 6 — 打磨
+### Phase 11 — 打磨
 
 - [ ] 后处理栈
 - [ ] 性能分析 (tracy 集成)
@@ -801,11 +962,11 @@ end
 - [ ] Demo 项目
 - [ ] 文档与示例
 
-**验收：** `xmake build Runtime` 生成无编辑器版本。打包成 zip 发给朋友能双击运行。Demo 是一个完整的 FPS 关卡（场景 + 敌人 + 计分）。tracy 能抓帧并显示 CPU/GPU 耗时分布。
+**验收：** xmake build Runtime 生成无编辑器版本。打包成 zip 发给朋友能双击运行。Demo 是一个完整的 FPS 关卡（场景 + 敌人 + 计分）。tracy 能抓帧并显示 CPU/GPU 耗时分布。
 
 ---
 
-### Phase 7 — 单元测试
+### Phase 12 — 单元测试
 
 - [x] 集成 Google Test (gtest) 框架
 - [x] LinearAllocator 单元测试
@@ -813,24 +974,17 @@ end
 - [x] EventBus 单元测试
 - [x] GameObject / Component / Transform 单元测试
 
-**测试框架：** Google Test (gtest)，通过 xrepo 管理 (`add_requires("gtest")`)。
+**测试框架：** Google Test (gtest)，通过 xrepo 管理 (add_requires("gtest"))。
 
-**测试目录：** `Tests/`，每个模块一个测试文件：
+**测试目录：** Tests/，每个模块一个测试文件：
 
-```
 Tests/
-├── TestLinearAllocator.cpp    # 帧分配器测试
-├── TestJsonArchive.cpp        # JSON 序列化测试
-├── TestEventBus.cpp           # 事件总线测试
-└── TestGameObject.cpp         # GameObject/Component/Transform 测试
-```
-
-**构建与运行：**
-
-```bash
-xmake build UnitTests
-xmake run UnitTests
-```
+├── TestLinearAllocator.cpp
+├── TestJsonArchive.cpp
+├── TestEventBus.cpp
+├── TestGameObject.cpp
+├── TestScene.cpp
+└── TestUI.cpp
 
 **验收：** 所有测试通过。每个新增模块都有对应的 gtest 测试文件。Sandbox 中不再包含测试代码，仅作为引擎运行沙盒。后续每个 Phase 完成后，新模块必须有对应的 gtest 测试。
 
@@ -853,7 +1007,8 @@ MyGame/
 │   ├── meshes/              #   .glb
 │   ├── textures/            #   .png / .jpg
 │   ├── sounds/              #   .wav / .ogg
-│   └── scripts/             #   .lua
+│   ├── scripts/             #   .lua
+│   └── ui/                  #   .rml / .rcss / .tga (RmlUi 资源)
 └── engine.conf              # 启动配置 (JSON)
 ```
 
@@ -880,7 +1035,7 @@ target("Runtime")
 
 ```cpp
 #include <FunEngine/Core.h>
-#include <FunEngine/Function/Scene/SceneManager.h>
+#include <FunEngine/Core/Scene/SceneManager.h>
 
 int main(int argc, char** argv) {
     fun::Engine engine(argc, argv);            // 读 engine.conf, 初始化所有子系统
@@ -914,7 +1069,7 @@ Windows 上把整个 `MyGame/` 打成 zip 分发给玩家。双击 `Runtime.exe`
 
 | 不做 Cooking | 做了 Cooking |
 |-------------|-------------|
-| glTF/PNG/WAV/Lua 源文件即运行时格式 | 需要离线工具转私有格式 |
+| glTF/PNG/WAV/Lua/RML 源文件即运行时格式 | 需要离线工具转私有格式 |
 | 首次启动慢 2-3 秒（解析 + GPU 上传） | 首次启动快 |
 | 资源可直接修改（mod 友好） | 资源被混淆 |
 | 零额外工具 | 需要开发和维护 Cooker |
