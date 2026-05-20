@@ -31,6 +31,9 @@ public:
     virtual void OnSerialize(JsonArchive& ar) { (void)ar; }
     virtual void OnInspector() {}
     virtual void OnBindLua() {}
+
+    // 克隆（用于 Prefab Instantiate）
+    virtual Component* Clone() const = 0;
 };
 
 // Component 类型工厂：从类型名字符串创建 Component 实例

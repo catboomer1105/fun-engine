@@ -1,5 +1,7 @@
 #include "Core/Serialization/JsonArchive.h"
 #include "Core/Math/MathTypes.h"
+#include <fstream>
+#include <sstream>
 
 namespace fun {
 
@@ -246,6 +248,21 @@ void JsonArchive::ArrayElement(size_t index, std::string& value) {
 
 std::string JsonArchive::ToString() const {
     return m_root.dump(2);
+}
+
+bool JsonArchive::SaveToFile(const std::string& path) const {
+    std::ofstream file(path);
+    if (!file.is_open()) return false;
+    file << m_root.dump(2);
+    return true;
+}
+
+JsonArchive JsonArchive::LoadFromFile(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) return JsonArchive("{}");
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return JsonArchive(buffer.str());
 }
 
 } // namespace fun

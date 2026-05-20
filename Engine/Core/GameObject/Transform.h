@@ -44,6 +44,8 @@ public:
 
     void OnSerialize(JsonArchive& ar) override;
 
+    Component* Clone() const override;
+
 private:
     Vec3 m_localPosition{0.0f, 0.0f, 0.0f};
     Quat m_localRotation{1.0f, 0.0f, 0.0f, 0.0f};

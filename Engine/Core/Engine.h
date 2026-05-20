@@ -2,9 +2,8 @@
 #include "Core/Log.h"
 #include "Core/Memory/LinearAllocator.h"
 #include "Core/Event/EventBus.h"
-#include "Core/GameObject/GameObject.h"
+#include "Core/Scene/SceneManager.h"
 #include <chrono>
-#include <vector>
 
 namespace fun {
 
@@ -14,19 +13,14 @@ public:
         : m_frameAllocator(1024 * 1024) { // 1MB 帧分配器
         s_instance = this;
         Log::Init();
-        FUN_INFO("FunEngine v0.1.0 -- Phase 2");
+        FUN_INFO("FunEngine v0.1.0 -- Phase 3");
         m_platformInit();
         m_running = true;
         m_lastFrame = std::chrono::high_resolution_clock::now();
     }
 
     ~Engine() {
-        // 清理根级 GameObject
-        for (auto* obj : m_rootObjects) {
-            delete obj;
-        }
-        m_rootObjects.clear();
-
+        // SceneManager 析构会卸载所有场景，销毁所有 GameObject
         m_platformShutdown();
         s_instance = nullptr;
         FUN_INFO("Engine shutdown complete");
@@ -43,9 +37,9 @@ public:
 
             m_platformPollEvents();
 
-            // 更新所有根级 GameObject
-            for (auto* obj : m_rootObjects) {
-                obj->Update(dt);
+            // 更新活动场景
+            if (auto* scene = m_sceneManager.GetActiveScene()) {
+                scene->OnUpdate(dt);
             }
 
             m_platformRender(dt);
@@ -58,20 +52,7 @@ public:
     // 核心层访问器
     LinearAllocator& GetFrameAllocator() { return m_frameAllocator; }
     EventBus& GetEventBus() { return m_eventBus; }
-
-    // GameObject 管理（临时方案，Phase 4 由 Scene 替代）
-    void AddRootObject(GameObject* obj) {
-        m_rootObjects.push_back(obj);
-        obj->SetInScene(true);
-    }
-
-    void RemoveRootObject(GameObject* obj) {
-        auto it = std::find(m_rootObjects.begin(), m_rootObjects.end(), obj);
-        if (it != m_rootObjects.end()) {
-            (*it)->SetInScene(false);
-            m_rootObjects.erase(it);
-        }
-    }
+    SceneManager& GetSceneManager() { return m_sceneManager; }
 
     // 全局实例访问
     static Engine* GetInstance() { return s_instance; }
@@ -81,7 +62,7 @@ private:
     std::chrono::high_resolution_clock::time_point m_lastFrame;
     LinearAllocator m_frameAllocator;
     EventBus m_eventBus;
-    std::vector<GameObject*> m_rootObjects;
+    SceneManager m_sceneManager;
 
     static inline Engine* s_instance = nullptr;
 

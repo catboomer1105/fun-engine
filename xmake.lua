@@ -7,7 +7,6 @@ set_runtimes("MT")
 
 add_rules("mode.debug", "mode.release")
 
--- Phase 2 新增 nlohmann_json; Phase 7 新增 gtest
 add_requires("libsdl3", "bgfx", "spdlog", "glm", "nlohmann_json", "gtest")
 
 

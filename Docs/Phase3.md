@@ -47,6 +47,8 @@ Engine/
 
 无需新增第三方库。场景序列化复用 `nlohmann_json`（Phase 2 已引入）。
 
+JsonArchive 新增文件 I/O 方法（`SaveToFile` / `LoadFromFile`），需要添加 `<fstream>` / `<sstream>` include（无新增链接依赖）。
+
 新增源文件：`Engine/Core/Scene/**.cpp` 被 `add_files("Engine/Core/**.cpp")` 自动覆盖，无需修改 xmake.lua。
 
 ---
@@ -62,7 +64,7 @@ Engine/
 #include <string>
 #include <vector>
 #include <functional>
-#include "Engine/Core/GameObject/GameObject.h"
+#include "Core/GameObject/GameObject.h"
 
 namespace fun {
 
@@ -88,6 +90,9 @@ public:
     // 获取根级对象列表
     const std::vector<GameObject*>& GetRootObjects() const { return m_rootObjects; }
 
+    // 将对象从根级列表移除（由 GameObject::SetParent 触发）
+    void RemoveFromRoot(GameObject* obj);
+
     // ── 序列化 ──
     void Serialize(JsonArchive& ar);
     void Deserialize(JsonArchive& ar);
@@ -111,7 +116,8 @@ private:
 
 **关键设计：**
 - 只持有根级 GameObject 列表，子对象通过 `GameObject::GetChildren()` 间接访问
-- `CreateGameObject` 创建的对象自动加入根级列表；若通过 `SetParent` 挂到其他对象下，则从根级列表移除
+- `CreateGameObject` 创建的对象自动加入根级列表；若通过 `SetParent` 挂到其他对象下，GameObject 通过内部 `m_scene` 指针回调 `Scene::RemoveFromRoot` 从根级列表移除（详见 5.1 节）
+- `Destroy` 递归销毁对象及其子对象和 Component
 - `ForEach` 递归遍历整棵树
 - 序列化/反序列化依赖 JsonArchive，格式即 .scene JSON
 
@@ -126,7 +132,7 @@ private:
 #include <string>
 #include <unordered_map>
 #include "Scene.h"
-#include "Engine/Core/Event/EventBus.h"
+#include "Core/Event/EventBus.h"
 
 namespace fun {
 
@@ -149,23 +155,29 @@ public:
     // 获取已加载的场景
     Scene* GetScene(const std::string& name) const;
 
-    // 事件：场景加载/卸载通知
-    Event<void(Scene*)> OnSceneLoaded;
-    Event<void(Scene*)> OnSceneUnloaded;
+    // 事件通过 EventBus 发送：
+    //   "SceneLoaded"   event.Set("scene", scenePtr)
+    //   "SceneUnloaded" event.Set("scene", scenePtr)
+    // 订阅示例：
+    //   Engine::GetInstance()->GetEventBus().Subscribe("SceneLoaded", [](const Event& e) {
+    //       auto* scene = e.Get<Scene*>("scene").value_or(nullptr);
+    //   });
 
 private:
     Scene* m_activeScene = nullptr;
     std::unordered_map<std::string, Scene*> m_loadedScenes;
+
+    void emitSceneEvent(const std::string& type, Scene* scene);
 };
 
 } // namespace fun
 ```
 
 **加载流程：**
-1. 读取 .scene JSON 文件
+1. `JsonArchive::LoadFromFile` 读取 .scene JSON 文件
 2. JsonArchive 反序列化 → 递归创建 GameObject 树
 3. 调用 `OnStart()` 初始化所有 Component
-4. 触发 `OnSceneLoaded` 事件
+4. 通过 EventBus 发送 `"SceneLoaded"` 事件（携带 Scene*）
 
 ---
 
@@ -176,7 +188,7 @@ private:
 ```cpp
 #pragma once
 #include <string>
-#include "Engine/Core/GameObject/GameObject.h"
+#include "Core/GameObject/GameObject.h"
 
 namespace fun {
 
@@ -264,12 +276,118 @@ Scene::FindByTag 遍历所有 GameObject 收集匹配 tag 的对象。
 
 ## 5. 实现顺序
 
-1. **Scene.h / Scene.cpp** — GameObject 容器 + 遍历 + 查找
-2. **Scene 序列化** — Serialize/Deserialize 与 JsonArchive 对接
-3. **SceneManager.h / SceneManager.cpp** — 加载/卸载/切换 + 事件
-4. **Prefab.h / Prefab.cpp** — 模板加载 + Instantiate 深拷贝
-5. **Tag 系统** — GameObject 添加 tag，Scene::FindByTag
-6. **Engine.h 集成** — Engine 持有 SceneManager，主循环调 Scene::OnUpdate
+1. **JsonArchive 扩展** — 添加 `SaveToFile` / `LoadFromFile` 方法
+2. **Scene.h / Scene.cpp** — GameObject 容器 + 遍历 + 查找
+3. **Scene 序列化** — Serialize/Deserialize 与 JsonArchive 对接
+4. **SceneManager.h / SceneManager.cpp** — 加载/卸载/切换 + EventBus 事件
+5. **Prefab.h / Prefab.cpp** — 模板加载 + Instantiate 深拷贝
+6. **Tag 系统** — GameObject 添加 tag 字段 + SetTag/GetTag，Scene::FindByTag
+7. **GameObject::SetParent 联动** — SetParent 时自动从 Scene 根级列表移除（见下方说明）
+8. **Engine.h 集成** — Engine 持有 SceneManager，替代临时 m_rootObjects（见下方代码）
+
+### 5.1 GameObject → Scene 同步机制
+
+`CreateGameObject` 将新对象加入 Scene 根级列表。若后续调用 `SetParent` 将对象挂到另一个 GameObject 下，需要从 Scene 根级列表中移除。  
+实现方式：在 `GameObject` 中添加 `Scene* m_scene` 指针，`SetParent` 中当新 parent 非空时调用 `m_scene->RemoveFromRoot(this)`。
+
+```cpp
+// GameObject.h 变更
+class GameObject {
+    // ... 现有成员 ...
+    Scene* m_scene = nullptr;  // 所属 Scene（Phase 3 新增）
+    
+    friend class Scene;  // 允许 Scene 设置 m_scene
+};
+
+// SetParent 实现片段（GameObject.cpp）
+void GameObject::SetParent(GameObject* parent) {
+    // ... 现有层级操作 ...
+    if (parent != nullptr && m_scene != nullptr) {
+        m_scene->RemoveFromRoot(this);
+    }
+    m_parent = parent;
+}
+```
+
+### 5.2 Engine.h 集成
+
+Engine 持有 SceneManager，主循环中调用活动场景的 OnUpdate，替代临时的 `m_rootObjects` 管理：
+
+```cpp
+// Engine.h 变更
+#pragma once
+#include "Core/Log.h"
+#include "Core/Memory/LinearAllocator.h"
+#include "Core/Event/EventBus.h"
+#include "Core/Scene/SceneManager.h"
+
+namespace fun {
+
+class Engine {
+public:
+    Engine(int argc, char** argv)
+        : m_frameAllocator(1024 * 1024) {
+        s_instance = this;
+        Log::Init();
+        FUN_INFO("FunEngine v0.1.0 -- Phase 3");
+        m_platformInit();
+        m_running = true;
+        m_lastFrame = std::chrono::high_resolution_clock::now();
+    }
+
+    ~Engine() {
+        // SceneManager 析构会卸载所有场景，销毁所有 GameObject
+        m_platformShutdown();
+        s_instance = nullptr;
+        FUN_INFO("Engine shutdown complete");
+    }
+
+    void Run() {
+        while (m_running) {
+            auto now = std::chrono::high_resolution_clock::now();
+            float dt = std::chrono::duration<float>(now - m_lastFrame).count();
+            m_lastFrame = now;
+
+            m_frameAllocator.Reset();
+            m_platformPollEvents();
+
+            // 更新活动场景
+            if (auto* scene = m_sceneManager.GetActiveScene()) {
+                scene->OnUpdate(dt);
+            }
+
+            m_platformRender(dt);
+        }
+    }
+
+    bool IsRunning() const { return m_running; }
+    void Quit() { m_running = false; }
+
+    LinearAllocator& GetFrameAllocator() { return m_frameAllocator; }
+    EventBus& GetEventBus() { return m_eventBus; }
+    SceneManager& GetSceneManager() { return m_sceneManager; }
+
+    static Engine* GetInstance() { return s_instance; }
+
+private:
+    bool m_running = false;
+    std::chrono::high_resolution_clock::time_point m_lastFrame;
+    LinearAllocator m_frameAllocator;
+    EventBus m_eventBus;
+    SceneManager m_sceneManager;
+
+    static inline Engine* s_instance = nullptr;
+
+    void m_platformInit();
+    void m_platformShutdown();
+    void m_platformPollEvents();
+    void m_platformRender(float dt);
+};
+
+} // namespace fun
+```
+
+**注意：** 原有 `m_rootObjects` / `AddRootObject` / `RemoveRootObject` 全部移除，GameObject 管理完全由 SceneManager 接管。
 
 ---
 
@@ -279,14 +397,13 @@ Scene::FindByTag 遍历所有 GameObject 收集匹配 tag 的对象。
 
 ```cpp
 // Samples/Sandbox/main.cpp
-#include <Engine/Core/Engine.h>
-#include <Engine/Core/Scene/SceneManager.h>
+#include "Core/Engine.h"
 
 int main(int argc, char** argv) {
     fun::Engine engine(argc, argv);
 
-    // 手动创建测试场景
-    auto* scene = engine.GetSceneManager().LoadScene("Assets/test.scene");
+    // 加载 .scene 文件（SceneManager 通过 Engine::GetSceneManager 访问）
+    engine.GetSceneManager().LoadScene("Assets/test.scene");
 
     engine.Run();
     return 0;
@@ -302,14 +419,14 @@ auto* obj = scene.CreateGameObject("Player");
 obj->SetTag("Player");
 obj->GetTransform()->SetPosition({1, 2, 3});
 
-// 保存
+// 保存（JsonArchive::SaveToFile 在 Phase 3 中新增）
 JsonArchive ar;
 scene.Serialize(ar);
 ar.SaveToFile("test_output.scene");
 
-// 加载
+// 加载（JsonArchive::LoadFromFile 在 Phase 3 中新增）
 Scene loaded("Test");
-JsonArchive ar2("test_output.scene");
+JsonArchive ar2 = JsonArchive::LoadFromFile("test_output.scene");
 loaded.Deserialize(ar2);
 
 auto* found = loaded.Find("Player");
@@ -346,7 +463,7 @@ xmake run Sandbox
 | Scene 创建 | CreateGameObject 返回有效对象，Find 能找到 |
 | 层级遍历 | ForEach 递归访问所有子对象 |
 | 序列化往返 | 场景保存为 JSON → 加载还原，GameObject 名/层级/Transform 完全一致 |
-| SceneManager 加载 | LoadScene 从 .scene 文件加载场景，触发 OnSceneLoaded |
+| SceneManager 加载 | LoadScene 从 .scene 文件加载场景，通过 EventBus 发送 "SceneLoaded" |
 | SceneManager 切换 | SetActiveScene 切换当前活动场景 |
 | Prefab 加载 | Load 后 Instantiate 生成独立副本 |
 | Tag 查找 | FindByTag 返回所有匹配对象 |

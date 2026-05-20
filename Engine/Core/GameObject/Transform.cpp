@@ -42,6 +42,16 @@ Vec3 Transform::GetUp() const {
     return m_localRotation * Vec3(0.0f, 1.0f, 0.0f);
 }
 
+Component* Transform::Clone() const {
+    auto* t = new Transform();
+    t->m_localPosition = m_localPosition;
+    t->m_localRotation = m_localRotation;
+    t->m_localScale = m_localScale;
+    t->m_dirty = true;
+    t->enabled = enabled;
+    return t;
+}
+
 void Transform::OnSerialize(JsonArchive& ar) {
     float px = m_localPosition.x, py = m_localPosition.y, pz = m_localPosition.z;
     float rx = m_localRotation.x, ry = m_localRotation.y, rz = m_localRotation.z, rw = m_localRotation.w;

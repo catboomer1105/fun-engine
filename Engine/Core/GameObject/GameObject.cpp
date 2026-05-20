@@ -1,5 +1,6 @@
 #include "Core/GameObject/GameObject.h"
 #include "Core/GameObject/Component.h"
+#include "Core/Scene/Scene.h"
 
 namespace fun {
 
@@ -91,12 +92,42 @@ void GameObject::SetParent(GameObject* parent) {
     // 加入新父级
     if (m_parent) {
         m_parent->m_children.push_back(this);
+        // 从 Scene 根级列表移除（Scene 负责管理根对象）
+        if (m_scene != nullptr) {
+            m_scene->RemoveFromRoot(this);
+        }
     }
 
     // 标记 Transform dirty
     if (m_transform) {
         m_transform->SetDirty();
     }
+}
+
+GameObject* GameObject::Clone() const {
+    auto* clone = new GameObject(m_name);
+    clone->m_tag = m_tag;
+    clone->SetActive(m_active);
+
+    // 克隆 Transform
+    delete clone->m_transform;
+    clone->m_transform = static_cast<Transform*>(m_transform->Clone());
+    clone->m_transform->gameObject = clone;
+
+    // 克隆组件（除 Transform 外）
+    for (auto* comp : m_components) {
+        Component* compClone = comp->Clone();
+        compClone->gameObject = clone;
+        clone->m_components.push_back(compClone);
+    }
+
+    // 递归克隆子对象
+    for (auto* child : m_children) {
+        GameObject* childClone = child->Clone();
+        childClone->SetParent(clone);
+    }
+
+    return clone;
 }
 
 void GameObject::Destroy() {
@@ -137,6 +168,7 @@ void GameObject::Update(float dt) {
 
 void GameObject::Serialize(JsonArchive& ar) {
     ar("name", m_name);
+    ar("tag", m_tag);
     ar("active", m_active);
 
     // 序列化 Transform
@@ -174,6 +206,10 @@ GameObject* GameObject::Deserialize(JsonArchive& ar) {
     ar("name", name);
 
     auto* obj = new GameObject(name);
+
+    std::string tag;
+    ar("tag", tag);
+    obj->m_tag = tag;
 
     bool active = true;
     ar("active", active);

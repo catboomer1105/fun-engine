@@ -21,6 +21,9 @@ public:
     const std::string& GetName() const { return m_name; }
     void SetName(const std::string& name) { m_name = name; }
 
+    const std::string& GetTag() const { return m_tag; }
+    void SetTag(const std::string& tag) { m_tag = tag; }
+
     Transform* GetTransform() const { return m_transform; }
     GameObject* GetParent() const { return m_parent; }
     const std::vector<GameObject*>& GetChildren() const { return m_children; }
@@ -80,6 +83,9 @@ public:
     // 层级
     void SetParent(GameObject* parent);
 
+    // 克隆（用于 Prefab Instantiate）
+    GameObject* Clone() const;
+
     // 销毁
     void Destroy();
 
@@ -92,12 +98,16 @@ public:
 
 private:
     std::string m_name;
+    std::string m_tag;
     Transform* m_transform;
     std::vector<Component*> m_components;
     GameObject* m_parent = nullptr;
     std::vector<GameObject*> m_children;
     bool m_active = true;
     bool m_inScene = false;
+
+    class Scene* m_scene = nullptr;
+    friend class Scene;
 };
 
 } // namespace fun

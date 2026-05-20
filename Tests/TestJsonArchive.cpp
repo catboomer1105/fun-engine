@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <Core/Serialization/JsonArchive.h>
 #include <cmath>
+#include <cstdio>
 
 using namespace fun;
 
@@ -107,4 +108,90 @@ TEST(JsonArchive, ReadMissingKeyDoesNotCrash) {
     int value = 999;
     reader("nonexistent", value);
     EXPECT_EQ(value, 999);  // 应保持原值
+}
+
+TEST(JsonArchive, SaveToFileAndLoadFromFile) {
+    const std::string path = "test_json_archive_temp.json";
+
+    // 写
+    JsonArchive writer;
+    int intValue = 123;
+    std::string strValue = "file test";
+    float floatValue = 4.5f;
+    writer("int", intValue);
+    writer("string", strValue);
+    writer("float", floatValue);
+
+    // 保存到文件
+    ASSERT_TRUE(writer.SaveToFile(path));
+
+    // 从文件加载
+    JsonArchive reader = JsonArchive::LoadFromFile(path);
+    EXPECT_TRUE(reader.IsReading());
+
+    int readInt = 0;
+    std::string readStr;
+    float readFloat = 0;
+    reader("int", readInt);
+    reader("string", readStr);
+    reader("float", readFloat);
+
+    EXPECT_EQ(readInt, 123);
+    EXPECT_EQ(readStr, "file test");
+    EXPECT_NEAR(readFloat, 4.5f, 0.001f);
+
+    // 清理
+    std::remove(path.c_str());
+}
+
+TEST(JsonArchive, LoadFromFileNonExistentReturnsEmpty) {
+    JsonArchive reader = JsonArchive::LoadFromFile("__nonexistent_file__.json");
+    EXPECT_TRUE(reader.IsReading());
+    // 读取不应崩溃
+    int value = 42;
+    reader("anything", value);
+    EXPECT_EQ(value, 42);
+}
+
+TEST(JsonArchive, SaveToFileInvalidPathReturnsFalse) {
+    JsonArchive writer;
+    int testVal = 1;
+    writer("test", testVal);
+    // 使用无效路径（Windows 上含非法字符或不存在目录）
+    EXPECT_FALSE(writer.SaveToFile("Z:/__nonexistent_dir__/__test__.json"));
+}
+
+TEST(JsonArchive, RoundTripViaFile) {
+    const std::string path = "test_json_roundtrip.json";
+
+    // 嵌套结构 + 数组
+    {
+        JsonArchive writer;
+        std::string sceneName = "Arena";
+        writer("name", sceneName);
+        writer.Push("transform");
+        float pos[3] = {1.0f, 2.0f, 3.0f};
+        writer.Vec3Serialize("position", pos);
+        writer.Pop();
+        ASSERT_TRUE(writer.SaveToFile(path));
+    }
+
+    // 读回
+    {
+        JsonArchive reader = JsonArchive::LoadFromFile(path);
+        std::string name;
+        reader("name", name);
+        EXPECT_EQ(name, "Arena");
+
+        reader.Push("transform");
+        float pos[3] = {};
+        reader.Vec3Serialize("position", pos);
+        reader.Pop();
+
+        EXPECT_NEAR(pos[0], 1.0f, 0.001f);
+        EXPECT_NEAR(pos[1], 2.0f, 0.001f);
+        EXPECT_NEAR(pos[2], 3.0f, 0.001f);
+    }
+
+    std::remove(path.c_str());
 }

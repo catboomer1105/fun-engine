@@ -51,6 +51,8 @@ public:
 
     // 输出
     std::string ToString() const;
+    bool SaveToFile(const std::string& path) const;
+    static JsonArchive LoadFromFile(const std::string& path);
 
 private:
     nlohmann::json* CurrentNode();

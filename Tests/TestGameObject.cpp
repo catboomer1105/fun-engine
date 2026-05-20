@@ -19,6 +19,13 @@ public:
         ar("speed", speed);
         ar("health", health);
     }
+
+    Component* Clone() const override {
+        auto* c = new TestComponent();
+        c->speed = speed;
+        c->health = health;
+        return c;
+    }
 };
 
 // 注册测试用组件（全局一次）
