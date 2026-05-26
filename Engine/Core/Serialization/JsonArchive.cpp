@@ -7,20 +7,20 @@ namespace fun {
 
 JsonArchive::JsonArchive()
     : m_reading(false) {
-    m_root = nlohmann::json::object();
+    m_root = nlohmann::ordered_json::object();
     m_stack.push_back(&m_root);
 }
 
 JsonArchive::JsonArchive(const std::string& jsonStr)
     : m_reading(true) {
-    m_root = nlohmann::json::parse(jsonStr, nullptr, false);
+    m_root = nlohmann::ordered_json::parse(jsonStr, nullptr, false);
     if (m_root.is_discarded()) {
-        m_root = nlohmann::json::object();
+        m_root = nlohmann::ordered_json::object();
     }
     m_stack.push_back(&m_root);
 }
 
-nlohmann::json* JsonArchive::CurrentNode() {
+nlohmann::ordered_json* JsonArchive::CurrentNode() {
     return m_stack.back();
 }
 
@@ -104,7 +104,7 @@ void JsonArchive::operator()(const std::string& key, float* data, int count) {
             }
         }
     } else {
-        nlohmann::json arr = nlohmann::json::array();
+        nlohmann::ordered_json arr = nlohmann::ordered_json::array();
         for (int i = 0; i < count; ++i) {
             arr.push_back(data[i]);
         }
@@ -128,13 +128,13 @@ void JsonArchive::Push(const std::string& key) {
         if (it != CurrentNode()->end() && it->is_object()) {
             m_stack.push_back(&(*it));
         } else {
-            static nlohmann::json s_empty = nlohmann::json::object();
+            static nlohmann::ordered_json s_empty = nlohmann::ordered_json::object();
             m_stack.push_back(&s_empty);
         }
     } else {
         auto& node = (*CurrentNode())[key];
         if (!node.is_object()) {
-            node = nlohmann::json::object();
+            node = nlohmann::ordered_json::object();
         }
         m_stack.push_back(&node);
     }
@@ -155,14 +155,14 @@ void JsonArchive::BeginArray(const std::string& key) {
             if (it != CurrentNode()->end() && it->is_array()) {
                 m_stack.push_back(&(*it));
             } else {
-                static nlohmann::json s_emptyArray = nlohmann::json::array();
+                static nlohmann::ordered_json s_emptyArray = nlohmann::ordered_json::array();
                 m_stack.push_back(&s_emptyArray);
             }
         }
     } else {
         auto& node = (*CurrentNode())[key];
         if (!node.is_array()) {
-            node = nlohmann::json::array();
+            node = nlohmann::ordered_json::array();
         }
         m_stack.push_back(&node);
     }
@@ -184,10 +184,10 @@ size_t JsonArchive::ArraySize() const {
 void JsonArchive::PushArrayElement() {
     if (m_reading) {
         // 读模式不应该调用这个
-        static nlohmann::json s_empty = nlohmann::json::object();
+        static nlohmann::ordered_json s_empty = nlohmann::ordered_json::object();
         m_stack.push_back(&s_empty);
     } else {
-        CurrentNode()->push_back(nlohmann::json::object());
+        CurrentNode()->push_back(nlohmann::ordered_json::object());
         m_stack.push_back(&CurrentNode()->back());
     }
 }
@@ -199,12 +199,12 @@ void JsonArchive::PushArrayElement(size_t index) {
         if (arr->is_array() && index < arr->size() && (*arr)[index].is_object()) {
             m_stack.push_back(&(*arr)[index]);
         } else {
-            static nlohmann::json s_empty = nlohmann::json::object();
+            static nlohmann::ordered_json s_empty = nlohmann::ordered_json::object();
             m_stack.push_back(&s_empty);
         }
     } else {
         // 写模式不应该调用这个
-        CurrentNode()->push_back(nlohmann::json::object());
+        CurrentNode()->push_back(nlohmann::ordered_json::object());
         m_stack.push_back(&CurrentNode()->back());
     }
 }

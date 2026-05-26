@@ -55,11 +55,11 @@ public:
     static JsonArchive LoadFromFile(const std::string& path);
 
 private:
-    nlohmann::json* CurrentNode();
+    nlohmann::ordered_json* CurrentNode();
 
     bool m_reading;
-    nlohmann::json m_root;
-    std::vector<nlohmann::json*> m_stack;
+    nlohmann::ordered_json m_root;
+    std::vector<nlohmann::ordered_json*> m_stack;
 };
 
 } // namespace fun

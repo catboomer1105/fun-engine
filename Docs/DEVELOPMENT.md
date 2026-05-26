@@ -215,7 +215,9 @@ public:
     // ── 序列化 / Inspector / Lua 绑定 — 子类手动覆写 ──
     virtual void OnSerialize(JsonArchive& ar) {}   // ar("speed", speed); ...
     virtual void OnInspector() {}                  // ImGui::DragFloat("Speed", &speed); ...
-    virtual void OnBindLua(sol::table& t) {}       // t["speed"] = &speed; ...
+    virtual void OnBindLua() {}                    // Phase 8 集成 sol2 后改为 sol::table& t
+
+    virtual Component* Clone() const = 0;          // Phase 3 新增，用于 Prefab 深拷贝
 
     bool enabled = true;
 };
@@ -223,7 +225,7 @@ public:
 // ── GameObject.h ──
 class GameObject {
     std::string m_name;
-    Transform* m_transform;                      // 必有组件
+    Transform* m_transform;                      // 必有组件（单独持有，不在 m_components 中）
     std::vector<Component*> m_components;        // 其他组件
     GameObject* m_parent = nullptr;
     std::vector<GameObject*> m_children;
@@ -347,6 +349,13 @@ class MyComponent : public Component {
         t["speed"]  = &speed;
         t["health"] = &health;
         t["name"]   = &name;
+    }
+
+    // 克隆 — 用于 Prefab::Instantiate 深拷贝
+    Component* Clone() const override {
+        auto* c = new MyComponent();
+        c->speed = speed; c->health = health; c->name = name;
+        return c;
     }
 };
 ```
@@ -839,19 +848,19 @@ end
 - [x] 事件总线
 - [x] GameObject / Component 系统（含 OnSerialize / OnInspector / OnBindLua 虚函数）
 
-**验收：** 能 `new GameObject("Test")`，`AddComponent<MyComponent>()`，`GetComponent<T>()`。一个 Component 覆写 `OnInspector()` 后能在 ImGui 窗口画自己的属性。GameObject 树能序列化为 JSON 再反序列化还原。事件总线能 `Emit("Damage", {target, 25})` 被订阅者收到。无需任何 ClassDB/PropertyInfo/Variant 代码。
+**验收：** 能 `new GameObject("Test")`，`AddComponent<MyComponent>()`，`GetComponent<T>()`。GameObject 层级树（SetParent / GetChildren）正确维护双向引用。Transform 支持本地/世界矩阵缓存和方向向量。GameObject 树能序列化为 JSON 再反序列化还原（含 Transform 和自定义 Component）。事件总线能发布/订阅事件（`Event` + `EventBus::Emit`）。ComponentRegistry 从类型名创建实例。无需任何 ClassDB/PropertyInfo/Variant 代码。Component::OnInspector / OnBindLua 已预留虚函数，待 Phase 8/10 集成。
 
 ---
 
 ### Phase 3 — 场景系统（核心层）
 
-- [ ] Scene 类：GameObject 层级树容器，创建/查找/销毁/遍历
-- [ ] Scene 序列化：场景保存/加载为 .scene JSON 文件
-- [ ] SceneManager：场景加载/卸载/切换，场景切换事件
-- [ ] Prefab：GameObject 模板，加载 .prefab 文件，Instantiate 深拷贝
-- [ ] Tag 系统：GameObject 按 tag 查找
+- [x] Scene 类：GameObject 层级树容器，创建/查找/销毁/遍历
+- [x] Scene 序列化：场景保存/加载为 .scene JSON 文件
+- [x] SceneManager：场景加载/卸载/切换，场景切换事件
+- [x] Prefab：GameObject 模板，加载 .prefab 文件，Instantiate 深拷贝
+- [x] Tag 系统：GameObject 按 tag 查找
 
-**验收：** SceneManager::LoadScene 从 JSON 文件加载完整场景（含多层嵌套 GameObject 和 Component 属性）。SaveScene 把当前场景序列化为 JSON 再加载回来，GameObject 层级和 Component 属性完全一致。Prefab::Load 后 Instantiate 在场景中生成实例。修改 .scene 文件后重新加载场景，修改生效。此 Phase 不涉及渲染——加载的场景对象在内存中存在，但还没有 MeshRenderer 等视觉 Component（留给 Phase 5 渲染系统）。
+**验收：** SceneManager::LoadScene 从 JSON 文件加载完整场景（含多层嵌套 GameObject 和 Component 属性）。Scene::SaveToFile / LoadFromFile 实现序列化往返，GameObject 层级、Transform、Tag 完全一致。Prefab::Load 后 Instantiate 深拷贝生成独立实例。修改 .scene 文件后重新加载生效。Component::Clone() 纯虚函数支持 Prefab 深拷贝。SetParent 自动从 Scene 根列表移除。Engine 主循环通过 SceneManager 更新活动场景。此 Phase 不涉及渲染——加载的场景对象在内存中存在，但还没有 MeshRenderer 等视觉 Component（留给 Phase 5）。
 
 ---
 
@@ -969,32 +978,119 @@ end
 ### Phase 12 — 单元测试
 
 - [x] 集成 Google Test (gtest) 框架
-- [x] LinearAllocator 单元测试
-- [x] JsonArchive 单元测试
-- [x] EventBus 单元测试
-- [x] GameObject / Component / Transform 单元测试
+- [x] LinearAllocator 单元测试 (5 tests)
+- [x] JsonArchive 单元测试 (10 tests)
+- [x] EventBus 单元测试 (9 tests)
+- [x] GameObject / Component / Transform 单元测试 (14 tests)
+- [x] Scene 单元测试 (12 tests)
+- [x] SceneManager 单元测试 (6 tests)
+- [x] Prefab 单元测试 (5 tests)
 
 **测试框架：** Google Test (gtest)，通过 xrepo 管理 (add_requires("gtest"))。
 
 **测试目录：** Tests/，每个模块一个测试文件：
 
 Tests/
-├── TestLinearAllocator.cpp
-├── TestJsonArchive.cpp
-├── TestEventBus.cpp
-├── TestGameObject.cpp
-├── TestScene.cpp
-└── TestUI.cpp
+|-- TestLinearAllocator.cpp
+|-- TestJsonArchive.cpp
+|-- TestEventBus.cpp
+|-- TestGameObject.cpp
+|-- TestScene.cpp
+|-- TestSceneManager.cpp
+|-- TestPrefab.cpp
+
+**总计 66 个测试用例，覆盖所有核心层子系统。**
 
 **验收：** 所有测试通过。每个新增模块都有对应的 gtest 测试文件。Sandbox 中不再包含测试代码，仅作为引擎运行沙盒。后续每个 Phase 完成后，新模块必须有对应的 gtest 测试。
 
 ---
 
-## 8. 打包与分发
+## 8. 引擎与游戏项目分离
+
+引擎是**库**，游戏是**独立项目**，双方通过 xrepo 包管理链接，互不侵入。
+
+### 8.1 目录结构
+
+```
+FunEngine/                     # 引擎仓库（引擎开发者维护）
+  Engine/  src
+  xmake.lua
+
+MyGame/                        # 游戏项目（独立仓库，游戏开发者维护）
+  Game/
+    Scripts/      player.lua     # Lua 脚本（游戏逻辑）
+    Components/   MyComponent.cpp # 自定义 C++ Component（可选）
+  Data/            arena.scene   # 场景 + 资源
+  engine.conf                     # 启动配置
+  xmake.lua                       # 链接 FunEngine
+```
+
+### 8.2 游戏开发者做什么
+
+| 工作内容 | 方式 |
+|---------|------|
+| 写游戏逻辑 | Lua 脚本，通过 LuaScript Component 执行 |
+| 搭场景 | .scene JSON 文件，由 SceneManager 加载 |
+| 放资源 | .glb / .png / .wav 文件，由 ResourceManager 加载 |
+| 自定义 Component | C++ 继承 Component，挂到 GameObject 上 |
+
+### 8.3 游戏侧 xmake.lua
+
+```lua
+add_requires("FunEngine")
+target("MyGame")
+    set_kind("binary")
+    add_files("Game/**.cpp")
+    add_deps("FunEngine")
+```
+
+游戏项目不需要克隆引擎仓库，只需引擎发布包作为 xrepo 依赖。
+
+### 8.4 编辑器使用
+
+引擎仓库编译出的 `Editor.exe` 是独立的编辑器可执行文件，游戏开发者用它操作自己的游戏项目。
+
+**打开项目：**
+
+```
+引擎开发者                          游戏开发者
+------------                        ------------
+xmake build Editor                   双击 Editor.exe
+  -> Editor.exe              --->    File -> Open Project -> 选 MyGame/
+```
+
+编辑器启动后读取游戏项目的 `engine.conf` 获取数据路径和启动场景。
+
+**编辑流程：**
+
+1. 在资源浏览器中右键导入模型/纹理/音效 -> 放入 `MyGame/Data/`
+2. 拖资源到场景中 -> 自动创建 GameObject + 对应 Component
+3. 在 Hierarchy 面板中选中对象 -> Inspector 编辑属性（调用 `comp->OnInspector()`）
+4. Ctrl+S -> 场景序列化为 `MyGame/Data/arena.scene`
+
+**Play Mode：**
+
+- 点击 Play -> 编辑器暂停自身更新循环，引擎独立 Run()
+- 运行效果与最终 `Runtime.exe` 一致（共享同一引擎库）
+- 点击 Stop -> 回到编辑模式，场景状态还原
+
+**和传统引擎的对比：**
+
+| | Unity / Unreal | Fun Engine |
+|---|---|---|
+| 编辑器来源 | 官方编译发布 | 引擎仓库自己编译 |
+| 项目打开方式 | Hub / Launcher 选择 | Editor.exe 通过 File 菜单指定目录 |
+| 场景文件 | 私有二进制/YAML | JSON 直接可读 |
+| 资源格式 | .meta + 导入后的内部格式 | 源文件即运行时格式 |
+| 编辑器代码 | 不开源 | `Engine/Editor/` 全部可见 |
+
+---
+
+## 9. 打包与分发
 
 引擎不依赖"资源烘焙"步骤——开发时用的 glTF/PNG/WAV/Lua 源文件即最终分发格式。只做三件事：构建 Runtime、整理资源目录、打包。
 
-### 8.1 目录结构
+### 9.1 目录结构
 
 ```
 MyGame/
@@ -1014,7 +1110,7 @@ MyGame/
 
 资源不需要 Cooking（v1 不做）。首次启动时引擎自动在 `Data/.cache/` 生成着色器二进制和动画预处理数据，后续启动直接读缓存。
 
-### 8.2 构建 Runtime
+### 9.2 构建 Runtime
 
 ```bash
 xmake f -m release
@@ -1031,7 +1127,7 @@ target("Runtime")
     add_deps("FunEngine")
 ```
 
-### 8.3 Runtime.cpp
+### 9.3 Runtime.cpp
 
 ```cpp
 #include <FunEngine/Core.h>
@@ -1046,7 +1142,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-### 8.4 engine.conf
+### 9.4 engine.conf
 
 ```json
 {
@@ -1061,11 +1157,11 @@ int main(int argc, char** argv) {
 }
 ```
 
-### 8.5 分发
+### 9.5 分发
 
 Windows 上把整个 `MyGame/` 打成 zip 分发给玩家。双击 `Runtime.exe` 即可运行。
 
-### 8.6 不做 Cooking 的理由
+### 9.6 不做 Cooking 的理由
 
 | 不做 Cooking | 做了 Cooking |
 |-------------|-------------|
@@ -1079,7 +1175,7 @@ Windows 上把整个 `MyGame/` 打成 zip 分发给玩家。双击 `Runtime.exe`
 
 ---
 
-## 9. 编码规范
+## 10. 编码规范
 
 - **语言：** C++20
 - **命名：**
@@ -1096,7 +1192,7 @@ Windows 上把整个 `MyGame/` 打成 zip 分发给玩家。双击 `Runtime.exe`
 
 ---
 
-## 10. 架构决策记录 (ADR)
+## 11. 架构决策记录 (ADR)
 
 ### ADR-001: 直接使用 STL 容器
 
