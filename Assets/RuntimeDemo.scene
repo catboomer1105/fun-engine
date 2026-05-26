@@ -1,0 +1,51 @@
+{
+  "name": "RuntimeDemo",
+  "gameObjects": [
+    {
+      "name": "StaticBlock",
+      "tag": "",
+      "active": true,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": [],
+      "children": []
+    },
+    {
+      "name": "SpinningCube",
+      "tag": "",
+      "active": true,
+      "transform": {
+        "position": [5.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": [
+        {
+          "type": "Rotator",
+          "speed": 45.0
+        }
+      ],
+      "children": []
+    },
+    {
+      "name": "FastSpinner",
+      "tag": "",
+      "active": true,
+      "transform": {
+        "position": [10.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": [
+        {
+          "type": "Rotator",
+          "speed": 180.0
+        }
+      ],
+      "children": []
+    }
+  ]
+}
